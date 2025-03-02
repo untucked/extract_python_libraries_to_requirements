@@ -19,6 +19,18 @@ PRE_LOADED_LIBRARIES = {
     'webbrowser', 'windows', 'wsgiref', 'zipapp', 'zipfile', 'zlib'
 }
 
+def get_local_modules(directory):
+    # Look for directories or .py files (excluding __init__.py) that could be local modules
+    local_modules = set()
+    for item in os.listdir(directory):
+        path = os.path.join(directory, item)
+        if os.path.isdir(path) and not item.startswith('__'):
+            local_modules.add(item)
+        elif os.path.isfile(path) and item.endswith('.py'):
+            module_name = os.path.splitext(item)[0]
+            local_modules.add(module_name)
+    return local_modules
+
 def get_python_files(directory):
     python_files = []
     for root, _, files in os.walk(directory):
@@ -37,12 +49,17 @@ def extract_imports(file_path):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.add(alias.name)
+                # Only take the top-level module
+                top_module = alias.name.split('.')[0]
+                imports.add(top_module)
         elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imports.add(node.module)
+            # Only add if it's not a relative import (node.level == 0)
+            if node.module and node.level == 0:
+                top_module = node.module.split('.')[0]
+                imports.add(top_module)
 
     return imports
+
 
 def select_directory():
     def select_directory_box():
@@ -58,8 +75,9 @@ def select_directory():
     return select_directory_box()
 
 
-def main():
-    directory_to_search = select_directory()
+def main(directory_to_search=None):
+    if not directory_to_search:
+        directory_to_search = select_directory()
     if not os.path.isdir(directory_to_search):
         print("The specified directory does not exist. Please try again.")
         return
@@ -71,26 +89,30 @@ def main():
         imports = extract_imports(file)
         all_imports.update(imports)
 
-    # Filter out pre-loaded libraries
-    unique_imports = {imp for imp in all_imports if imp not in PRE_LOADED_LIBRARIES}
+    local_modules = get_local_modules(directory_to_search)
 
-    with open('requirements_generated.txt', 'w', encoding='utf-8') as req_file:
-        for library in sorted(unique_imports):
-            req_file.write(f"{library}\n")
-
-    print(f"Requirements file 'requirements_generated.txt' generated successfully with {len(unique_imports)} unique libraries.")
+    # Filter out pre-loaded libraries and local modules
+    unique_imports = {
+        imp for imp in all_imports 
+        if imp not in PRE_LOADED_LIBRARIES and imp not in local_modules
+    }
 
     # Check if requirements.txt exists in the directory
     requirements_file_path = os.path.join(directory_to_search, 'requirements.txt')
     if 'requirements.txt' not in os.listdir(directory_to_search):
         with open(requirements_file_path, 'w', encoding='utf-8') as req_file:
-            for library in sorted(all_imports):
+            for library in sorted(unique_imports):
                 req_file.write(f"{library}\n")
         print(f"Requirements file 'requirements.txt' generated successfully.")
     else:
         print("Requirements file 'requirements.txt' already exists in the directory.")
-
-    
+        with open(os.path.join(directory_to_search, 'requirements_generated.txt'), 'w', encoding='utf-8') as req_file:
+            for library in sorted(unique_imports):
+                req_file.write(f"{library}\n")
+        print(f"Requirements file 'requirements_generated.txt' generated successfully with {len(unique_imports)} unique libraries.")
 
 if __name__ == "__main__":
-    main()
+    # directory_to_search = r'C:\Users\bradley.eylander\OneDrive - LMI Consulting\Documents\Python\rfid_tracer'
+    # directory_to_search = '.'
+    directory_to_search=None
+    main(directory_to_search=directory_to_search)
